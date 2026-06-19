@@ -8,12 +8,16 @@
 #   - sets the custom domain
 #   - enables "Enforce HTTPS" (best-effort; the cert can take a while the first time)
 #
+# The Pages/domain/HTTPS API calls are best-effort and never abort the run: the
+# workflow's actions/configure-pages step auto-enables Pages and the shipped
+# CNAME file sets the domain, so the site comes up even if a call here is rejected.
+#
 # Prereqs (one-time):
 #   1. Install the GitHub CLI:  https://cli.github.com
 #   2. Authenticate:            gh auth login
 #
 # Usage:
-#   DOMAIN=www.yourname.tech ./scripts/setup.sh
+#   DOMAIN=www.yourname.tech ./scripts/setup.sh     # or just ./scripts/setup.sh and it asks
 #   DOMAIN=viz.yourname.tech REPO=interview-visualizer ./scripts/setup.sh
 #
 set -euo pipefail
@@ -24,10 +28,19 @@ DOMAIN="${DOMAIN:-}"
 VISIBILITY="${VISIBILITY:-public}"   # public is required for free Actions + Pages
 BRANCH="main"
 
+note() { printf '    %s\n' "$*"; }
+# Run a command but never abort the script if it fails (stderr stays visible).
+try()  { "$@" || note "(non-fatal) step failed, continuing — see message above"; }
+
 # ---- preflight -------------------------------------------------------------
 command -v gh >/dev/null 2>&1 || { echo "ERROR: gh (GitHub CLI) is not installed — https://cli.github.com"; exit 1; }
 gh auth status >/dev/null 2>&1   || { echo "ERROR: not authenticated. Run: gh auth login"; exit 1; }
-[ -n "$DOMAIN" ] || { echo "ERROR: set DOMAIN, e.g.  DOMAIN=www.yourname.tech ./scripts/setup.sh"; exit 1; }
+
+# Ask for the domain if it wasn't provided (and we have an interactive terminal).
+if [ -z "$DOMAIN" ] && [ -t 0 ]; then
+  read -r -p "Custom domain (e.g. www.yourname.tech): " DOMAIN
+fi
+[ -n "$DOMAIN" ] || { echo "ERROR: no DOMAIN given. Re-run:  DOMAIN=www.yourname.tech ./scripts/setup.sh"; exit 1; }
 
 cd "$(dirname "$0")/.."   # repo root
 OWNER="$(gh api user --jq .login)"
@@ -57,26 +70,30 @@ else
   gh repo create "$SLUG" --"$VISIBILITY" --source=. --remote=origin --push
 fi
 
-# ---- 4. Pages: Source = GitHub Actions -------------------------------------
-echo "==> Configuring Pages (build_type=workflow)"
+# ---- 4. Pages: Source = GitHub Actions (best-effort) -----------------------
+echo "==> Enabling Pages (Source = GitHub Actions)"
 if gh api "repos/$SLUG/pages" >/dev/null 2>&1; then
-  gh api -X PUT "repos/$SLUG/pages" -f build_type=workflow >/dev/null
+  try gh api -X PUT "repos/$SLUG/pages" -f build_type=workflow >/dev/null
 else
-  gh api -X POST "repos/$SLUG/pages" -f build_type=workflow >/dev/null
+  try gh api -X POST "repos/$SLUG/pages" -f build_type=workflow >/dev/null
 fi
 
-# ---- 5. custom domain ------------------------------------------------------
+# ---- 5. custom domain (best-effort; also shipped via the CNAME artifact) ---
 echo "==> Setting custom domain: $DOMAIN"
-gh api -X PUT "repos/$SLUG/pages" -f cname="$DOMAIN" -f build_type=workflow >/dev/null
+try gh api -X PUT "repos/$SLUG/pages" -f cname="$DOMAIN" -f build_type=workflow >/dev/null
 
 # ---- 6. enforce HTTPS (best-effort; cert may not be ready yet) --------------
 echo "==> Attempting to enable Enforce HTTPS"
 if gh api -X PUT "repos/$SLUG/pages" -F https_enforced=true >/dev/null 2>&1; then
   echo "    HTTPS enforced."
 else
-  echo "    Cert not ready yet — re-run later or enable later with:"
+  echo "    Cert not ready yet — enable later with:"
   echo "      gh api -X PUT repos/$SLUG/pages -F https_enforced=true"
 fi
+
+# ---- 7. trigger a deploy now that Pages is configured ----------------------
+echo "==> Triggering a deploy"
+try gh workflow run deploy.yml --ref "$BRANCH" >/dev/null
 
 cat <<EOF
 
