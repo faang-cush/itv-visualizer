@@ -18,12 +18,12 @@
 #
 # Usage:
 #   DOMAIN=www.yourname.tech ./scripts/setup.sh     # or just ./scripts/setup.sh and it asks
-#   DOMAIN=viz.yourname.tech REPO=interview-visualizer ./scripts/setup.sh
+#   DOMAIN=viz.yourname.tech REPO=itv-visualizer ./scripts/setup.sh
 #
 set -euo pipefail
 
 # ---- config (override via environment) -------------------------------------
-REPO="${REPO:-interview-visualizer}"
+REPO="${REPO:-itv-visualizer}"
 DOMAIN="${DOMAIN:-}"
 VISIBILITY="${VISIBILITY:-public}"   # public is required for free Actions + Pages
 BRANCH="main"

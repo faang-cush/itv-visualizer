@@ -90,7 +90,7 @@ clicking through the UI.
 **Run it:**
 ```bash
 DOMAIN=www.yourname.tech ./scripts/setup.sh
-# or: DOMAIN=viz.yourname.tech REPO=interview-visualizer ./scripts/setup.sh
+# or: DOMAIN=viz.yourname.tech REPO=itv-visualizer ./scripts/setup.sh
 ```
 
 The script is idempotent (safe to re-run) and:
