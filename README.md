@@ -154,7 +154,6 @@ Requirements:
 - Include this exact tag in the head: <meta name="status" content="active">
 - The page must work by simply opening the file — no build step, no server.
 - Do NOT use localStorage, sessionStorage, or any browser storage API. Keep all state in memory only. (It will be embedded in a sandboxed Notion iframe that blocks storage.)
-- Make it responsive and ensure it looks good both full-page and at a constrained height of about 400–600px.
 - Keyboard-accessible and respects prefers-reduced-motion.
 
 Then build the visualization described below:
