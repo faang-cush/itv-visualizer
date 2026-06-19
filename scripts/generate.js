@@ -110,6 +110,38 @@ function formatDate(iso) {
 }
 
 // ---------------------------------------------------------------------------
+// Repo info (for the "edit on GitHub" links) — derived from the git remote so
+// it always matches wherever the site is actually pushed/deployed.
+// ---------------------------------------------------------------------------
+
+function gitRepoSlug() {
+  try {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const m = url.match(/github\.com[:/]+([^/]+)\/(.+?)(?:\.git)?\/?$/i);
+    if (m) return `${m[1]}/${m[2]}`;
+  } catch (e) {
+    /* no remote (e.g. local-only) — edit links are simply omitted */
+  }
+  return null;
+}
+
+const REPO_SLUG = gitRepoSlug();
+const SITE_BRANCH = process.env.GITHUB_REF_NAME || 'main';
+
+// Line number of the <meta name="status"> tag, so the edit link can jump to it.
+function statusLineNumber(html) {
+  const lines = html.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (/<meta\b[^>]*\bname\s*=\s*["']status["']/i.test(lines[i])) return i + 1;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Collect modules
 // ---------------------------------------------------------------------------
 
@@ -145,12 +177,21 @@ function collectModules() {
       warn(`No Git creation date for "${file}" — using file mtime.`);
     }
 
+    const statusLine = statusLineNumber(html);
+    let editUrl = null;
+    if (REPO_SLUG) {
+      editUrl = `https://github.com/${REPO_SLUG}/edit/${SITE_BRANCH}/modules/${file}`;
+      if (statusLine) editUrl += `#L${statusLine}`;
+    }
+
     entries.push({
       name,
       status,
       href: `modules/${file}`,
       displayDate,
       sortKey,
+      statusLine,
+      editUrl,
     });
   }
 
@@ -163,15 +204,33 @@ function collectModules() {
 // Render homepage
 // ---------------------------------------------------------------------------
 
+function renderActionCell(e) {
+  if (!e.editUrl) return '<td class="action"></td>';
+  const target = e.status === 'active' ? 'archived' : 'active';
+  const label = e.status === 'active' ? 'Archive' : 'Activate';
+  const where = e.statusLine ? `line ${e.statusLine}` : 'the status meta tag';
+  const title =
+    `Opens ${e.href} on GitHub at ${where}. ` +
+    `Change content="${e.status}" to content="${target}", then click “Commit changes”. ` +
+    `The site rebuilds in ~30s.`;
+  return (
+    `<td class="action">` +
+    `<a class="edit" href="${escapeHtml(e.editUrl)}" target="_blank" rel="noopener noreferrer" ` +
+    `title="${escapeHtml(title)}" aria-label="${escapeHtml(label + ' — ' + e.name + '. ' + title)}">` +
+    `${label}</a></td>`
+  );
+}
+
 function renderRows(entries) {
   if (!entries.length) {
-    return `<tr class="empty"><td colspan="2">Nothing here yet.</td></tr>`;
+    return `<tr class="empty"><td colspan="3">Nothing here yet.</td></tr>`;
   }
   return entries
     .map(
       (e) => `<tr>
             <td class="name"><a href="${escapeHtml(e.href)}">${escapeHtml(e.name)}</a></td>
             <td class="date">${escapeHtml(e.displayDate)}</td>
+            ${renderActionCell(e)}
           </tr>`
     )
     .join('\n          ');
@@ -351,6 +410,72 @@ function renderHomepage(active, archived) {
       white-space: nowrap;
     }
 
+    /* Per-row "edit on GitHub" control */
+    .action-col, td.action {
+      width: 1%;
+      text-align: right;
+      white-space: nowrap;
+      padding-left: 8px;
+    }
+
+    a.edit {
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--text-faint);
+      text-decoration: none;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 11px;
+      transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease, opacity 0.14s ease;
+      opacity: 0;            /* quiet until the row is hovered/focused */
+    }
+
+    tbody tr:hover a.edit,
+    a.edit:focus-visible { opacity: 1; }
+
+    a.edit:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    a.edit:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* Touch devices have no hover — keep the control visible there. */
+    @media (hover: none) {
+      a.edit { opacity: 0.8; }
+    }
+
+    /* When embedded in Notion (inside an iframe) keep the view a clean
+       Name + Date table — hide the management controls entirely. */
+    body.embedded .action-col,
+    body.embedded td.action,
+    body.embedded .admin-hint { display: none !important; }
+
+    .sr-only {
+      position: absolute;
+      width: 1px; height: 1px;
+      padding: 0; margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap; border: 0;
+    }
+
+    .admin-hint {
+      margin-top: 14px;
+      font-size: 0.74rem;
+      line-height: 1.5;
+      color: var(--text-faint);
+    }
+    .admin-hint code {
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+    }
+
     tr.empty td {
       text-align: center;
       color: var(--text-faint);
@@ -393,7 +518,7 @@ function renderHomepage(active, archived) {
       <div role="tabpanel" id="panel-active" aria-labelledby="tab-active">
         <table>
           <thead>
-            <tr><th scope="col">Name</th><th scope="col" class="date-col">Date Created</th></tr>
+            <tr><th scope="col">Name</th><th scope="col" class="date-col">Date Created</th><th scope="col" class="action-col"><span class="sr-only">Actions</span></th></tr>
           </thead>
           <tbody>
           ${renderRows(active)}
@@ -404,7 +529,7 @@ function renderHomepage(active, archived) {
       <div role="tabpanel" id="panel-archived" aria-labelledby="tab-archived" hidden>
         <table>
           <thead>
-            <tr><th scope="col">Name</th><th scope="col" class="date-col">Date Created</th></tr>
+            <tr><th scope="col">Name</th><th scope="col" class="date-col">Date Created</th><th scope="col" class="action-col"><span class="sr-only">Actions</span></th></tr>
           </thead>
           <tbody>
           ${renderRows(archived)}
@@ -413,11 +538,25 @@ function renderHomepage(active, archived) {
       </div>
     </div>
 
+    <p class="admin-hint">
+      Hover a row and click <strong>Archive</strong> / <strong>Activate</strong> to open that file
+      on GitHub at its <code>&lt;meta name="status"&gt;</code> line — change
+      <code>content="active"</code> ⇄ <code>content="archived"</code>, then “Commit changes”.
+      The site rebuilds in ~30s. (These controls are hidden when the page is embedded in Notion.)
+    </p>
+
     <footer>Push an .html file to <code>modules/</code> — this page rebuilds itself.</footer>
   </main>
 
   <script>
     (function () {
+      // In a Notion embed we're inside a cross-origin iframe; hide admin controls there.
+      try {
+        if (window.self !== window.top) document.body.classList.add('embedded');
+      } catch (e) {
+        document.body.classList.add('embedded');
+      }
+
       var counts = { active: ${active.length}, archived: ${archived.length} };
       var tabs = {
         active: document.getElementById('tab-active'),

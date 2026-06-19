@@ -62,21 +62,28 @@ column is the date the file was first committed to Git. Rows are sorted newest-f
 
 ## Archiving a module
 
-To archive a module, open it and change:
+**Easiest — from the homepage:** open the live site **directly** (not the Notion embed), hover
+a row, and click the **Archive** / **Activate** link. It opens that file in GitHub's web editor,
+jumped to the `<meta name="status">` line, with a tooltip telling you exactly what to change.
+Flip `content="active"` ⇄ `content="archived"` and click **Commit changes** — the site rebuilds
+in ~30s. (These controls are hidden inside the Notion embed, so the embed stays a clean
+Name + Date table.)
+
+**Or by hand:** open the module and change
 
 ```html
 <meta name="status" content="active">
 ```
 
-to:
+to
 
 ```html
 <meta name="status" content="archived">
 ```
 
-Then push. On the next deploy it moves from the **Active** tab to the **Archived** tab. The
-module's URL does **not** change, so any existing Notion embed keeps working. Reversible at
-any time — flip it back to `active`.
+then push. Either way, the module moves from the **Active** tab to the **Archived** tab on the
+next deploy. The module's URL does **not** change, so any existing Notion embed keeps working.
+Reversible at any time — flip it back to `active`.
 
 ---
 
