@@ -145,15 +145,12 @@ file's modification time and prints a warning).
 Paste this before any module-generation request to an AI, then describe the concept:
 
 ```
-Output exactly ONE self-contained .html file — all HTML, CSS, and JavaScript inline in that single file. No separate files. Any libraries must be loaded from a CDN.
+I am learning for backend dev 4YOE interview. Build a visualization for:
+- [Concept] — focus on [the one thing that's hardest to remember] & all things you need it
 
-Requirements:
-- Include a <title> in the head: this is the human-readable name of the visualization.
-- Include this exact tag in the head: <meta name="status" content="active">
-- The page must work by simply opening the file — no build step, no server.
-- Do NOT use localStorage, sessionStorage, or any browser storage API. Keep all state in memory only. (It will be embedded in a sandboxed Notion iframe that blocks storage.)
-- Keyboard-accessible and respects prefers-reduced-motion.
-
-Then build the visualization described below:
-[describe the concept to visualize here]
+One self-contained .html file, all inline. CDN libs OK.
+<title> = human-readable name. <meta name="status" content="active">.
+No localStorage/sessionStorage. State in memory only (Notion iframe sandbox).
+Laptop only, no responsive needed.
+Keyboard-accessible, respects prefers-reduced-motion.
 ```
