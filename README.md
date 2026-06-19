@@ -96,7 +96,7 @@ clicking through the UI.
 
 **Run it:**
 ```bash
-DOMAIN=www.yourname.tech ./scripts/setup.sh
+DOMAIN=https://learning.visualizeconcepts.tech ./scripts/setup.sh
 # or: DOMAIN=viz.yourname.tech REPO=itv-visualizer ./scripts/setup.sh
 ```
 
@@ -114,10 +114,6 @@ record:
 | Type | Host / Name | Value / Points to | TTL |
 |---|---|---|---|
 | `CNAME` | `www` *(or your chosen subdomain)* | `<your-username>.github.io` | default |
-
-After the Action runs (see the repo's **Actions** tab) and DNS propagates, the site is live at
-`https://www.yourname.tech`. Until DNS resolves it's reachable at the temporary
-`https://<username>.github.io/<repo>/`.
 
 **Embed in Notion:** type `/embed`, paste a page URL (the homepage, or any individual module),
 and adjust the embed height.
