@@ -1,0 +1,1218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How Kafka ACK Works</title>
+  <meta name="status" content="active">
+  <style>
+    :root {
+      --bg: #0f1117;
+      --bg2: #161b27;
+      --bg3: #1e2535;
+      --surface: #242c3d;
+      --surface2: #2d3650;
+      --border: rgba(255,255,255,0.08);
+      --border2: rgba(255,255,255,0.15);
+      --text: #e8eaf2;
+      --text2: #8b92a8;
+      --text3: #5a6278;
+      --accent: #5b8df6;
+      --accent2: #3d6fe8;
+      --green: #34c98a;
+      --green2: #1fa86d;
+      --amber: #f5a623;
+      --red: #e85555;
+      --purple: #a78bfa;
+      --teal: #2dd4bf;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f7f8fc;
+        --bg2: #eef0f7;
+        --bg3: #e4e7f2;
+        --surface: #ffffff;
+        --surface2: #f0f2fa;
+        --border: rgba(0,0,0,0.08);
+        --border2: rgba(0,0,0,0.15);
+        --text: #1a1d2e;
+        --text2: #4a5068;
+        --text3: #8a90a8;
+        --accent: #2e5fd4;
+        --accent2: #1d4bbf;
+        --green: #1b9e6b;
+        --green2: #137d54;
+        --amber: #c07c0a;
+        --red: #c83535;
+        --purple: #6d47d9;
+        --teal: #0d9488;
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 16px; }
+    body {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 0;
+    }
+    .sr-only { position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0; }
+
+    /* Header */
+    .header {
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 32px 16px;
+    }
+    .header-top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+    .header-subtitle {
+      font-size: 12px;
+      color: var(--text3);
+      font-family: sans-serif;
+      font-weight: 400;
+    }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-top: 14px;
+    }
+    .tab-btn {
+      font-family: sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text2);
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 6px 14px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tab-btn:hover { background: var(--bg3); color: var(--text); }
+    .tab-btn.active {
+      background: var(--surface);
+      border-color: var(--border2);
+      color: var(--text);
+    }
+    .tab-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* Main content */
+    .main { padding: 24px 32px 48px; max-width: 1000px; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ACK Mode cards */
+    .mode-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+    @media (max-width: 700px) { .mode-grid { grid-template-columns: 1fr; } }
+    .mode-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.15s;
+      position: relative;
+      overflow: hidden;
+    }
+    .mode-card:hover { border-color: var(--border2); background: var(--surface2); }
+    .mode-card.selected { border-color: var(--accent); }
+    .mode-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--card-accent, transparent);
+      transition: opacity 0.15s;
+    }
+    .mode-card[data-mode="0"]  { --card-accent: var(--red); }
+    .mode-card[data-mode="1"]  { --card-accent: var(--amber); }
+    .mode-card[data-mode="-1"] { --card-accent: var(--green); }
+    .mode-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .mode-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-family: sans-serif;
+      margin-bottom: 4px;
+    }
+    .mode-card[data-mode="0"] .mode-label  { color: var(--red); }
+    .mode-card[data-mode="1"] .mode-label  { color: var(--amber); }
+    .mode-card[data-mode="-1"] .mode-label { color: var(--green); }
+    .mode-title {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 6px;
+      letter-spacing: -0.03em;
+    }
+    .mode-desc {
+      font-size: 12px;
+      font-family: sans-serif;
+      font-weight: 400;
+      color: var(--text2);
+      line-height: 1.5;
+    }
+    .mode-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      margin-top: 10px;
+      font-size: 11px;
+      font-family: sans-serif;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: 99px;
+    }
+    .badge-perf { background: rgba(248,113,113,0.12); color: var(--red); }
+    .badge-bal  { background: rgba(245,166,35,0.12);  color: var(--amber); }
+    .badge-safe { background: rgba(52,201,138,0.12);  color: var(--green); }
+
+    /* Simulation arena */
+    .sim-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .sim-title {
+      font-size: 12px;
+      font-family: sans-serif;
+      color: var(--text3);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .sim-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .btn {
+      font-family: sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 7px 16px;
+      border-radius: 7px;
+      border: 1px solid var(--border2);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .btn:hover { background: var(--surface2); border-color: var(--accent); color: var(--accent); }
+    .btn:active { transform: scale(0.97); }
+    .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .btn.primary { background: var(--accent2); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover { background: var(--accent); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    /* Canvas arena */
+    .arena {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 16px;
+      overflow: hidden;
+      position: relative;
+      min-height: 280px;
+    }
+
+    /* Broker row */
+    .broker-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .broker-node {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      position: relative;
+    }
+    .broker-node.leader { border-color: var(--accent); }
+    .broker-node.active-ack {
+      border-color: var(--green);
+      box-shadow: 0 0 0 2px rgba(52,201,138,0.18);
+    }
+    .broker-node.follower { border-color: var(--border); }
+    .broker-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      font-family: sans-serif;
+      margin-bottom: 4px;
+    }
+    .broker-leader-label { color: var(--accent); }
+    .broker-follower-label { color: var(--text3); }
+    .broker-name { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+    .broker-id { font-size: 11px; color: var(--text3); font-family: sans-serif; }
+    .broker-offset-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 10px;
+      font-size: 11px;
+      font-family: monospace;
+      color: var(--text2);
+    }
+    .offset-val {
+      background: var(--bg3);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--teal);
+      min-width: 28px;
+      text-align: center;
+      transition: all 0.3s;
+    }
+    .offset-val.updated {
+      background: rgba(45,212,191,0.15);
+      color: var(--teal);
+    }
+    .replication-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--border2);
+      transition: background 0.3s;
+      display: inline-block;
+    }
+    .replication-dot.synced { background: var(--green); }
+    .replication-dot.pending { background: var(--amber); }
+
+    /* Producer + Consumer row */
+    .producer-consumer-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .endpoint-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      flex-shrink: 0;
+    }
+    .endpoint-label {
+      font-size: 10px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-family: sans-serif;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .endpoint-name { font-size: 13px; font-weight: 600; color: var(--text); }
+
+    .wire {
+      flex: 1;
+      height: 2px;
+      background: var(--border2);
+      border-radius: 1px;
+      position: relative;
+      overflow: visible;
+    }
+    .wire-label {
+      position: absolute;
+      top: -18px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 10px;
+      font-family: sans-serif;
+      color: var(--text3);
+      white-space: nowrap;
+    }
+
+    /* Message packet animation */
+    .packet-track {
+      position: relative;
+      height: 40px;
+      margin: 8px 0 16px;
+      overflow: visible;
+    }
+    .packet {
+      position: absolute;
+      top: 8px;
+      height: 24px;
+      padding: 0 10px;
+      border-radius: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: monospace;
+      display: flex;
+      align-items: center;
+      white-space: nowrap;
+      transition: left 0.55s cubic-bezier(0.4,0,0.2,1), opacity 0.3s;
+      will-change: left;
+    }
+    .packet.msg { background: rgba(91,141,246,0.2); border: 1px solid var(--accent); color: var(--accent); }
+    .packet.ack { background: rgba(52,201,138,0.2); border: 1px solid var(--green); color: var(--green); }
+    .packet.nak { background: rgba(232,85,85,0.2); border: 1px solid var(--red); color: var(--red); }
+    @media (prefers-reduced-motion: reduce) {
+      .packet { transition: none; }
+      .offset-val { transition: none; }
+    }
+
+    /* Log panel */
+    .log-panel {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      max-height: 160px;
+      overflow-y: auto;
+      font-size: 12px;
+      font-family: monospace;
+    }
+    .log-entry {
+      padding: 3px 0;
+      border-bottom: 1px solid var(--border);
+      line-height: 1.5;
+      display: flex;
+      gap: 10px;
+    }
+    .log-entry:last-child { border-bottom: none; }
+    .log-time { color: var(--text3); flex-shrink: 0; }
+    .log-msg { color: var(--text2); }
+    .log-msg .ok  { color: var(--green); }
+    .log-msg .err { color: var(--red); }
+    .log-msg .info { color: var(--accent); }
+    .log-msg .warn { color: var(--amber); }
+
+    /* Stats row */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 16px;
+    }
+    @media (max-width: 600px) { .stats-row { grid-template-columns: repeat(2, 1fr); } }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .stat-label { font-size: 10px; font-family: sans-serif; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+    .stat-val { font-size: 22px; font-weight: 700; letter-spacing: -0.03em; }
+    .stat-sent { color: var(--accent); }
+    .stat-acked { color: var(--green); }
+    .stat-lost  { color: var(--red); }
+    .stat-lat   { color: var(--teal); }
+
+    /* Concepts tab */
+    .concept-section { margin-bottom: 32px; }
+    .concept-section h2 {
+      font-size: 15px;
+      font-family: sans-serif;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 14px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .concept-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 600px) { .concept-grid { grid-template-columns: 1fr; } }
+    .concept-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .concept-card h3 { font-size: 13px; font-weight: 600; font-family: sans-serif; color: var(--text); margin-bottom: 6px; }
+    .concept-card p { font-size: 12px; font-family: sans-serif; line-height: 1.6; color: var(--text2); }
+    .concept-card code {
+      background: var(--bg3);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: monospace;
+      font-size: 11px;
+      color: var(--teal);
+    }
+
+    .flow-compare {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .flow-compare-header {
+      display: grid;
+      grid-template-columns: 140px 1fr 1fr 1fr;
+      background: var(--bg3);
+      border-bottom: 1px solid var(--border);
+    }
+    .flow-compare-header div {
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-family: sans-serif;
+      color: var(--text3);
+    }
+    .flow-compare-row {
+      display: grid;
+      grid-template-columns: 140px 1fr 1fr 1fr;
+      border-bottom: 1px solid var(--border);
+    }
+    .flow-compare-row:last-child { border-bottom: none; }
+    .flow-compare-row div {
+      padding: 9px 12px;
+      font-size: 12px;
+      font-family: sans-serif;
+      color: var(--text2);
+      border-right: 1px solid var(--border);
+    }
+    .flow-compare-row div:last-child { border-right: none; }
+    .flow-compare-row .row-label { color: var(--text3); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .cell-red    { color: var(--red) !important; }
+    .cell-amber  { color: var(--amber) !important; }
+    .cell-green  { color: var(--green) !important; }
+    .cell-accent { color: var(--accent) !important; }
+
+    /* ISR visual */
+    .isr-diagram {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .isr-node {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      min-width: 110px;
+      text-align: center;
+    }
+    .isr-node.in-isr { border-color: var(--green); background: rgba(52,201,138,0.06); }
+    .isr-node.out-isr { border-color: var(--red); background: rgba(232,85,85,0.06); opacity: 0.7; }
+    .isr-node-name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .isr-node-status { font-size: 11px; font-family: sans-serif; }
+    .isr-node.in-isr .isr-node-status  { color: var(--green); }
+    .isr-node.out-isr .isr-node-status { color: var(--red); }
+    .isr-arrow {
+      color: var(--text3);
+      font-size: 18px;
+      padding-top: 24px;
+    }
+
+    /* Scenario tab */
+    .scenario-list { display: flex; flex-direction: column; gap: 16px; }
+    .scenario-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .scenario-card h3 {
+      font-size: 14px;
+      font-weight: 600;
+      font-family: sans-serif;
+      color: var(--text);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .scenario-badge {
+      font-size: 10px;
+      font-weight: 600;
+      font-family: sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+    .scenario-badge.use { background: rgba(91,141,246,0.15); color: var(--accent); }
+    .scenario-badge.avoid { background: rgba(232,85,85,0.12); color: var(--red); }
+    .scenario-card p { font-size: 13px; font-family: sans-serif; line-height: 1.6; color: var(--text2); }
+    .scenario-card .config {
+      margin-top: 10px;
+      background: var(--bg3);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 11px;
+      font-family: monospace;
+      color: var(--teal);
+      line-height: 1.7;
+    }
+
+    /* Speed control */
+    .speed-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      font-family: sans-serif;
+      color: var(--text2);
+    }
+    .speed-row input[type=range] { width: 80px; }
+    .speed-label { min-width: 40px; color: var(--text3); font-family: monospace; }
+
+    /* Broker ISR badge */
+    .isr-badge {
+      position: absolute;
+      top: 8px; right: 8px;
+      font-size: 9px;
+      font-family: sans-serif;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 3px;
+      background: rgba(52,201,138,0.12);
+      color: var(--green);
+    }
+    .isr-badge.out { background: rgba(232,85,85,0.1); color: var(--red); }
+  </style>
+</head>
+<body>
+
+<h2 class="sr-only">Kafka ACK (Acknowledgment) visualization — interactive simulation showing how acks=0, acks=1, and acks=-1 behave with producers, brokers, and replication.</h2>
+
+<div class="header">
+  <div class="header-top">
+    <h1>kafka producer acks</h1>
+    <span class="header-subtitle">producer.acks configuration — reliability vs throughput</span>
+  </div>
+  <div class="tabs" role="tablist" aria-label="Visualization sections">
+    <button class="tab-btn active" role="tab" aria-selected="true"  data-tab="simulate" id="tab-simulate">Simulate</button>
+    <button class="tab-btn"        role="tab" aria-selected="false" data-tab="concepts" id="tab-concepts">Concepts</button>
+    <button class="tab-btn"        role="tab" aria-selected="false" data-tab="scenarios" id="tab-scenarios">When to use</button>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- ===== SIMULATE TAB ===== -->
+  <div class="tab-panel active" id="panel-simulate" role="tabpanel" aria-labelledby="tab-simulate">
+
+    <div class="mode-grid" role="radiogroup" aria-label="Select ACK mode">
+      <div class="mode-card selected" tabindex="0" role="radio" aria-checked="true"  data-mode="0"  aria-label="acks=0 Fire and Forget">
+        <div class="mode-label">Mode 1</div>
+        <div class="mode-title">acks=0</div>
+        <div class="mode-desc">Producer sends and forgets. No wait for any broker response.</div>
+        <div class="mode-badge badge-perf">⚡ Max throughput</div>
+      </div>
+      <div class="mode-card"          tabindex="0" role="radio" aria-checked="false" data-mode="1"  aria-label="acks=1 Leader ACK">
+        <div class="mode-label">Mode 2</div>
+        <div class="mode-title">acks=1</div>
+        <div class="mode-desc">Leader broker writes to disk, sends ACK. Followers may lag.</div>
+        <div class="mode-badge badge-bal">⚖ Balanced</div>
+      </div>
+      <div class="mode-card"          tabindex="0" role="radio" aria-checked="false" data-mode="-1" aria-label="acks=all Full ISR ACK">
+        <div class="mode-label">Mode 3</div>
+        <div class="mode-title">acks=all</div>
+        <div class="mode-desc">All In-Sync Replicas must acknowledge. Strongest guarantee.</div>
+        <div class="mode-badge badge-safe">🔒 Safest</div>
+      </div>
+    </div>
+
+    <div class="sim-header">
+      <div class="sim-title">LIVE SIMULATION</div>
+      <div class="sim-controls">
+        <div class="speed-row">
+          <span>Speed</span>
+          <input type="range" id="speed-slider" min="1" max="4" step="1" value="2" aria-label="Simulation speed">
+          <span class="speed-label" id="speed-label">2x</span>
+        </div>
+        <button class="btn primary" id="btn-send"  aria-label="Send one message">Send msg</button>
+        <button class="btn"         id="btn-burst" aria-label="Send 5 messages quickly">Burst ×5</button>
+        <button class="btn"         id="btn-fail"  aria-label="Simulate broker failure">Fail leader</button>
+        <button class="btn"         id="btn-reset" aria-label="Reset simulation">Reset</button>
+      </div>
+    </div>
+
+    <!-- Arena -->
+    <div class="arena" id="sim-arena" aria-live="polite" aria-atomic="false">
+
+      <!-- Producer -->
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px;">
+        <div class="endpoint-box">
+          <div class="endpoint-label">Producer</div>
+          <div class="endpoint-name" id="producer-status">app-01</div>
+        </div>
+
+        <div style="flex:1; position:relative;">
+          <!-- Packet track for producer→leader -->
+          <div class="packet-track" id="track-produce">
+            <!-- packets injected here by JS -->
+          </div>
+        </div>
+
+        <!-- Broker cluster -->
+        <div style="flex:2;">
+          <div class="broker-row" id="broker-row">
+            <div class="broker-node leader" id="broker-0">
+              <div class="isr-badge" id="broker-0-isr">ISR</div>
+              <div class="broker-label broker-leader-label">Leader</div>
+              <div class="broker-name">broker-0</div>
+              <div class="broker-id">kafka:9092</div>
+              <div class="broker-offset-row">
+                <span>offset</span>
+                <span class="offset-val" id="offset-0">0</span>
+                <span class="replication-dot synced" id="dot-0" title="Synced"></span>
+              </div>
+            </div>
+            <div class="broker-node follower" id="broker-1">
+              <div class="isr-badge" id="broker-1-isr">ISR</div>
+              <div class="broker-label broker-follower-label">Follower</div>
+              <div class="broker-name">broker-1</div>
+              <div class="broker-id">kafka:9093</div>
+              <div class="broker-offset-row">
+                <span>offset</span>
+                <span class="offset-val" id="offset-1">0</span>
+                <span class="replication-dot synced" id="dot-1" title="Synced"></span>
+              </div>
+            </div>
+            <div class="broker-node follower" id="broker-2">
+              <div class="isr-badge" id="broker-2-isr">ISR</div>
+              <div class="broker-label broker-follower-label">Follower</div>
+              <div class="broker-name">broker-2</div>
+              <div class="broker-id">kafka:9094</div>
+              <div class="broker-offset-row">
+                <span>offset</span>
+                <span class="offset-val" id="offset-2">0</span>
+                <span class="replication-dot synced" id="dot-2" title="Synced"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ACK return track -->
+          <div class="packet-track" id="track-ack" style="margin-bottom:0; height:32px;">
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Log -->
+    <div class="log-panel" id="log-panel" aria-label="Event log" role="log">
+      <div class="log-entry"><span class="log-time">00:00</span><span class="log-msg"><span class="info">Ready.</span> Select a mode and click "Send msg" to begin.</span></div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-row" aria-label="Statistics">
+      <div class="stat-card">
+        <div class="stat-label">Sent</div>
+        <div class="stat-val stat-sent" id="stat-sent">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Acked</div>
+        <div class="stat-val stat-acked" id="stat-acked">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Lost</div>
+        <div class="stat-val stat-lost" id="stat-lost">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Avg latency</div>
+        <div class="stat-val stat-lat" id="stat-lat">—</div>
+      </div>
+    </div>
+
+  </div><!-- /simulate -->
+
+
+  <!-- ===== CONCEPTS TAB ===== -->
+  <div class="tab-panel" id="panel-concepts" role="tabpanel" aria-labelledby="tab-concepts">
+
+    <div class="concept-section">
+      <h2>How the three modes compare</h2>
+      <div class="flow-compare">
+        <div class="flow-compare-header">
+          <div>Property</div>
+          <div style="color:var(--red)">acks=0</div>
+          <div style="color:var(--amber)">acks=1</div>
+          <div style="color:var(--green)">acks=all (−1)</div>
+        </div>
+        <div class="flow-compare-row">
+          <div class="row-label">Who acks?</div>
+          <div class="cell-red">Nobody</div>
+          <div class="cell-amber">Leader only</div>
+          <div class="cell-green">All ISR brokers</div>
+        </div>
+        <div class="flow-compare-row">
+          <div class="row-label">Throughput</div>
+          <div class="cell-green">Highest</div>
+          <div class="cell-amber">Medium</div>
+          <div class="cell-red">Lower</div>
+        </div>
+        <div class="flow-compare-row">
+          <div class="row-label">Durability</div>
+          <div class="cell-red">None</div>
+          <div class="cell-amber">Partial</div>
+          <div class="cell-green">Strong</div>
+        </div>
+        <div class="flow-compare-row">
+          <div class="row-label">Data loss risk</div>
+          <div class="cell-red">High (always possible)</div>
+          <div class="cell-amber">Medium (leader crash)</div>
+          <div class="cell-green">Minimal (with min.insync.replicas)</div>
+        </div>
+        <div class="flow-compare-row">
+          <div class="row-label">Latency</div>
+          <div class="cell-green">Near zero</div>
+          <div class="cell-amber">One RTT</div>
+          <div class="cell-red">Multiple RTTs</div>
+        </div>
+        <div class="flow-compare-row">
+          <div class="row-label">Retries safe?</div>
+          <div>—</div>
+          <div class="cell-amber">Usually (check idempotent)</div>
+          <div class="cell-green">Yes (enable.idempotence)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="concept-section">
+      <h2>Key concepts</h2>
+      <div class="concept-grid">
+        <div class="concept-card">
+          <h3>ISR — In-Sync Replicas</h3>
+          <p>A dynamic set of brokers that have replicated all messages within <code>replica.lag.time.max.ms</code>. For <code>acks=all</code>, every broker in this set must write and confirm. If a follower falls behind, it's removed from ISR.</p>
+        </div>
+        <div class="concept-card">
+          <h3>min.insync.replicas</h3>
+          <p>Works together with <code>acks=all</code>. Sets the minimum ISR size that must be available. E.g. with 3 replicas and <code>min.insync.replicas=2</code>, the cluster can tolerate 1 broker failure without blocking the producer.</p>
+        </div>
+        <div class="concept-card">
+          <h3>The acks=1 silent loss</h3>
+          <p>Leader acks the producer, then crashes before followers replicate. Kafka elects a new leader from the followers — this new leader does not have the message. The producer got an ACK but the message is gone.</p>
+        </div>
+        <div class="concept-card">
+          <h3>Idempotent producer</h3>
+          <p>Set <code>enable.idempotence=true</code> (default in Kafka 3+). Each message gets a sequence ID. Retries won't cause duplicates. Required for exactly-once semantics. Automatically sets <code>acks=all</code>.</p>
+        </div>
+        <div class="concept-card">
+          <h3>acks=all flow</h3>
+          <p>1. Producer → Leader (write to log). 2. Leader → Follower-1 (replicate). 3. Leader → Follower-2 (replicate). 4. Followers ACK leader. 5. Leader ACKs producer. Only then does the producer continue.</p>
+        </div>
+        <div class="concept-card">
+          <h3>Unclean leader election</h3>
+          <p>If <code>unclean.leader.election.enable=true</code>, a lagging broker can become leader — accepting possible data loss. For financial/transactional topics set it to <code>false</code> (default since Kafka 0.11).</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="concept-section">
+      <h2>ISR membership</h2>
+      <div class="isr-diagram">
+        <div class="isr-node in-isr">
+          <div class="isr-node-name">broker-0</div>
+          <div class="isr-node-status">Leader · ISR ✓</div>
+        </div>
+        <div class="isr-arrow">→</div>
+        <div class="isr-node in-isr">
+          <div class="isr-node-name">broker-1</div>
+          <div class="isr-node-status">Follower · ISR ✓</div>
+        </div>
+        <div class="isr-arrow">→</div>
+        <div class="isr-node out-isr">
+          <div class="isr-node-name">broker-2</div>
+          <div class="isr-node-status">Lagging · out of ISR ✗</div>
+        </div>
+        <div style="flex-basis:100%; font-size:12px; font-family:sans-serif; color:var(--text2); padding-top:4px;">
+          With <strong style="color:var(--text)">acks=all</strong> and <strong style="color:var(--text)">min.insync.replicas=2</strong>, the above cluster can still produce — broker-2 is out of ISR but the 2 remaining ISR brokers satisfy the minimum.
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /concepts -->
+
+
+  <!-- ===== SCENARIOS TAB ===== -->
+  <div class="tab-panel" id="panel-scenarios" role="tabpanel" aria-labelledby="tab-scenarios">
+    <div class="scenario-list">
+
+      <div class="scenario-card">
+        <h3>
+          Metrics / click-stream ingestion
+          <span class="scenario-badge use">USE acks=0</span>
+        </h3>
+        <p>You're sending millions of analytics events per second. Losing a few events is acceptable. Every millisecond of latency matters. Fire-and-forget gives you the highest possible throughput with minimal broker overhead.</p>
+        <div class="config">
+acks=0
+compression.type=lz4
+linger.ms=5
+batch.size=65536</div>
+      </div>
+
+      <div class="scenario-card">
+        <h3>
+          Activity feeds / notification events
+          <span class="scenario-badge use">USE acks=1</span>
+        </h3>
+        <p>A reasonable middle ground. You want reasonable reliability without paying the full cost of ISR acknowledgment on every message. Acceptable for workloads where an occasional message loss on leader crash is tolerable.</p>
+        <div class="config">
+acks=1
+retries=3
+retry.backoff.ms=100</div>
+      </div>
+
+      <div class="scenario-card">
+        <h3>
+          Financial transactions / order events
+          <span class="scenario-badge use">USE acks=all</span>
+        </h3>
+        <p>You must not lose a single message. Payments, inventory updates, booking confirmations — any message loss causes real-world problems. Use acks=all with idempotent producer for exactly-once semantics.</p>
+        <div class="config">
+acks=all  (or acks=-1)
+min.insync.replicas=2
+enable.idempotence=true
+retries=Integer.MAX_VALUE
+max.in.flight.requests.per.connection=5</div>
+      </div>
+
+      <div class="scenario-card">
+        <h3>
+          Using acks=1 for financial events
+          <span class="scenario-badge avoid">AVOID</span>
+        </h3>
+        <p>Leader acks your payment, then crashes before replication. A new leader is elected — it never got the message. The payment is silently lost but the producer returned success. Your system believes the payment was recorded.</p>
+        <div class="config">
+# Dangerous pattern for critical data:
+acks=1  ← leader acks, then crashes
+# Follower elected as new leader
+# Message is gone — no error returned to producer</div>
+      </div>
+
+      <div class="scenario-card">
+        <h3>
+          High-throughput with strong guarantees
+          <span class="scenario-badge use">USE acks=all + tuning</span>
+        </h3>
+        <p>You need both throughput and durability. Tune batching to amortize the ISR ack cost across many messages. <code>linger.ms</code> delays sending slightly to fill batches. Combine with async callbacks instead of blocking <code>.get()</code>.</p>
+        <div class="config">
+acks=all
+linger.ms=20
+batch.size=131072
+compression.type=snappy
+enable.idempotence=true</div>
+      </div>
+
+    </div>
+  </div><!-- /scenarios -->
+
+</div><!-- /main -->
+
+<script>
+(function(){
+  'use strict';
+
+  // Tab switching
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      btn.setAttribute('aria-selected','true');
+      document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  // State
+  let currentMode = 0;
+  let offsets = [0, 0, 0];
+  let leaderAlive = true;
+  let stats = { sent: 0, acked: 0, lost: 0, totalLat: 0, latCount: 0 };
+  let isr = [true, true, true];
+  let msgCounter = 0;
+  let animating = false;
+  let startTime = Date.now();
+  let speed = 2;
+
+  // Speed slider
+  const speedSlider = document.getElementById('speed-slider');
+  speedSlider.addEventListener('input', () => {
+    speed = parseInt(speedSlider.value);
+    document.getElementById('speed-label').textContent = speed + 'x';
+  });
+
+  // Mode card selection
+  document.querySelectorAll('.mode-card').forEach(card => {
+    const activate = () => {
+      document.querySelectorAll('.mode-card').forEach(c => { c.classList.remove('selected'); c.setAttribute('aria-checked','false'); });
+      card.classList.add('selected');
+      card.setAttribute('aria-checked','true');
+      currentMode = parseInt(card.dataset.mode);
+      log(`<span class="info">Mode changed to acks=${currentMode}</span>`);
+    };
+    card.addEventListener('click', activate);
+    card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } });
+  });
+
+  function timestamp() {
+    const ms = Date.now() - startTime;
+    const s = Math.floor(ms/1000);
+    const m = Math.floor(ms/60000);
+    const ss = String(s % 60).padStart(2,'0');
+    const mm = String(m).padStart(2,'0');
+    return mm + ':' + ss;
+  }
+
+  function log(msg) {
+    const panel = document.getElementById('log-panel');
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    entry.innerHTML = `<span class="log-time">${timestamp()}</span><span class="log-msg">${msg}</span>`;
+    panel.appendChild(entry);
+    panel.scrollTop = panel.scrollHeight;
+    while (panel.children.length > 40) panel.removeChild(panel.firstChild);
+  }
+
+  function updateStats() {
+    document.getElementById('stat-sent').textContent  = stats.sent;
+    document.getElementById('stat-acked').textContent = stats.acked;
+    document.getElementById('stat-lost').textContent  = stats.lost;
+    const lat = stats.latCount > 0 ? Math.round(stats.totalLat / stats.latCount) : null;
+    document.getElementById('stat-lat').textContent   = lat !== null ? lat + 'ms' : '—';
+  }
+
+  function updateOffsetDisplay(brokerId, val) {
+    const el = document.getElementById('offset-' + brokerId);
+    el.textContent = val;
+    el.classList.add('updated');
+    setTimeout(() => el.classList.remove('updated'), 600);
+  }
+
+  function updateISRBadge(brokerId, inISR) {
+    const badge = document.getElementById('broker-' + brokerId + '-isr');
+    badge.textContent = inISR ? 'ISR' : 'Out';
+    badge.classList.toggle('out', !inISR);
+    const dot = document.getElementById('dot-' + brokerId);
+    dot.classList.toggle('synced', inISR);
+    dot.classList.toggle('pending', !inISR);
+  }
+
+  function createPacket(text, type, startPct, endPct, trackId, duration) {
+    const track = document.getElementById(trackId);
+    const pkt = document.createElement('div');
+    pkt.className = 'packet ' + type;
+    pkt.textContent = text;
+    pkt.style.left = startPct + '%';
+    pkt.style.opacity = '1';
+    track.appendChild(pkt);
+    const baseDuration = duration / speed;
+    pkt.style.transition = `left ${baseDuration}ms cubic-bezier(0.4,0,0.2,1), opacity 0.25s`;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        pkt.style.left = endPct + '%';
+      });
+    });
+    return new Promise(res => {
+      setTimeout(() => {
+        pkt.style.opacity = '0';
+        setTimeout(() => { if (pkt.parentNode) pkt.parentNode.removeChild(pkt); }, 300);
+        res();
+      }, baseDuration + 50);
+    });
+  }
+
+  function delay(ms) {
+    return new Promise(res => setTimeout(res, ms / speed));
+  }
+
+  async function sendMessage(forceLoss) {
+    if (!leaderAlive) { log('<span class="err">Leader is down! Cannot produce.</span>'); return; }
+    msgCounter++;
+    const msgId = 'msg-' + msgCounter;
+    const t0 = performance.now();
+    stats.sent++;
+    updateStats();
+
+    const label = `[${msgId}]`;
+    log(`<span class="info">→ Sending</span> ${label} with acks=${currentMode}`);
+
+    // Send to leader
+    await createPacket(label, 'msg', 2, 78, 'track-produce', 500);
+
+    if (currentMode === 0) {
+      // acks=0: no ack, just write
+      offsets[0]++;
+      updateOffsetDisplay(0, offsets[0]);
+      const lat = Math.round(performance.now() - t0);
+      stats.acked++;
+      stats.totalLat += lat;
+      stats.latCount++;
+      updateStats();
+      log(`<span class="ok">✓ acks=0</span> ${label} written (no ack received by design) — ${lat}ms`);
+      // Async replicate
+      setTimeout(async () => {
+        if (isr[1]) { offsets[1] = offsets[0]; updateOffsetDisplay(1, offsets[1]); }
+        if (isr[2]) { offsets[2] = offsets[0]; updateOffsetDisplay(2, offsets[2]); }
+      }, 300 / speed);
+    }
+    else if (currentMode === 1) {
+      // acks=1: leader writes, acks
+      offsets[0]++;
+      updateOffsetDisplay(0, offsets[0]);
+      document.getElementById('broker-0').classList.add('active-ack');
+      await delay(200);
+      // ACK back
+      await createPacket('ACK', 'ack', 78, 2, 'track-ack', 400);
+      document.getElementById('broker-0').classList.remove('active-ack');
+      const lat = Math.round(performance.now() - t0);
+      if (forceLoss) {
+        stats.lost++;
+        updateStats();
+        log(`<span class="warn">⚠ Leader crashed after ack!</span> ${label} — LOST on failover — ${lat}ms`);
+      } else {
+        stats.acked++;
+        stats.totalLat += lat;
+        stats.latCount++;
+        updateStats();
+        log(`<span class="ok">✓ acks=1</span> ${label} leader acked — ${lat}ms`);
+      }
+      // Replicate asynchronously
+      await delay(250);
+      if (!forceLoss) {
+        if (isr[1]) { offsets[1] = offsets[0]; updateOffsetDisplay(1, offsets[1]); }
+        if (isr[2]) { offsets[2] = offsets[0]; updateOffsetDisplay(2, offsets[2]); }
+      }
+    }
+    else {
+      // acks=all
+      offsets[0]++;
+      updateOffsetDisplay(0, offsets[0]);
+      document.getElementById('broker-0').classList.add('active-ack');
+
+      // Replicate to each ISR follower
+      const isrFollowers = [1,2].filter(i => isr[i]);
+      const repPromises = isrFollowers.map(async (bId) => {
+        await delay(120);
+        offsets[bId] = offsets[0];
+        updateOffsetDisplay(bId, offsets[bId]);
+        document.getElementById('broker-' + bId).classList.add('active-ack');
+        await delay(100);
+        document.getElementById('broker-' + bId).classList.remove('active-ack');
+      });
+      await Promise.all(repPromises);
+
+      // All ISR have written, leader sends ACK
+      await createPacket('ACK-all', 'ack', 78, 2, 'track-ack', 450);
+      document.getElementById('broker-0').classList.remove('active-ack');
+
+      const lat = Math.round(performance.now() - t0);
+      stats.acked++;
+      stats.totalLat += lat;
+      stats.latCount++;
+      updateStats();
+      log(`<span class="ok">✓ acks=all</span> ${label} — ${isrFollowers.length + 1} ISR brokers confirmed — ${lat}ms`);
+    }
+  }
+
+  document.getElementById('btn-send').addEventListener('click', async () => {
+    if (animating) return;
+    animating = true;
+    document.getElementById('btn-send').disabled = true;
+    await sendMessage(false);
+    document.getElementById('btn-send').disabled = false;
+    animating = false;
+  });
+
+  document.getElementById('btn-burst').addEventListener('click', async () => {
+    if (animating) return;
+    animating = true;
+    document.getElementById('btn-burst').disabled = true;
+    for (let i = 0; i < 5; i++) {
+      await sendMessage(false);
+      await delay(150);
+    }
+    document.getElementById('btn-burst').disabled = false;
+    animating = false;
+  });
+
+  document.getElementById('btn-fail').addEventListener('click', async () => {
+    if (animating) return;
+    animating = true;
+    document.getElementById('btn-fail').disabled = true;
+
+    if (!leaderAlive) {
+      // Recover
+      leaderAlive = true;
+      isr[0] = true;
+      updateISRBadge(0, true);
+      const b0 = document.getElementById('broker-0');
+      b0.style.opacity = '1';
+      b0.querySelector('.broker-label').textContent = 'Leader';
+      b0.querySelector('.broker-label').className = 'broker-label broker-leader-label';
+      log('<span class="ok">✓ broker-0 recovered and rejoined ISR</span>');
+      document.getElementById('btn-fail').textContent = 'Fail leader';
+    } else {
+      // If acks=1, simulate the silent loss scenario
+      if (currentMode === 1) {
+        await sendMessage(true); // send with forced loss
+        await delay(300);
+      }
+      leaderAlive = false;
+      isr[0] = false;
+      updateISRBadge(0, false);
+      const b0 = document.getElementById('broker-0');
+      b0.style.opacity = '0.35';
+      // Promote broker-1 to leader
+      const b1 = document.getElementById('broker-1');
+      b1.querySelector('.broker-label').textContent = 'New Leader';
+      b1.querySelector('.broker-label').className = 'broker-label broker-leader-label';
+      b1.classList.remove('follower');
+      b1.classList.add('leader');
+      log('<span class="err">✗ broker-0 FAILED</span> — broker-1 elected as new leader');
+      if (currentMode === 1) {
+        log(`<span class="warn">⚠ acks=1 silent loss:</span> msg may have been acked by leader but not replicated`);
+      }
+      document.getElementById('btn-fail').textContent = 'Recover';
+    }
+    document.getElementById('btn-fail').disabled = false;
+    animating = false;
+  });
+
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    offsets = [0,0,0];
+    leaderAlive = true;
+    isr = [true, true, true];
+    stats = { sent:0, acked:0, lost:0, totalLat:0, latCount:0 };
+    msgCounter = 0;
+    startTime = Date.now();
+
+    [0,1,2].forEach(i => {
+      updateOffsetDisplay(i, 0);
+      updateISRBadge(i, true);
+    });
+    const b0 = document.getElementById('broker-0');
+    b0.style.opacity = '1';
+    b0.querySelector('.broker-label').textContent = 'Leader';
+    b0.querySelector('.broker-label').className = 'broker-label broker-leader-label';
+    const b1 = document.getElementById('broker-1');
+    b1.querySelector('.broker-label').textContent = 'Follower';
+    b1.querySelector('.broker-label').className = 'broker-label broker-follower-label';
+    b1.classList.remove('leader');
+    b1.classList.add('follower');
+
+    document.getElementById('btn-fail').textContent = 'Fail leader';
+    updateStats();
+
+    const panel = document.getElementById('log-panel');
+    panel.innerHTML = '<div class="log-entry"><span class="log-time">00:00</span><span class="log-msg"><span class="ok">Reset.</span> All brokers online, offsets cleared.</span></div>';
+  });
+
+})();
+</script>
+</body>
+</html>
