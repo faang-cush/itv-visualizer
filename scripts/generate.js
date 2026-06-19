@@ -2,7 +2,7 @@
 'use strict';
 
 /*
- * Homepage generator for the Interview Visualizer site.
+ * Homepage generator for the Itv Visualizer site.
  *
  * - Reads every *.html file in modules/
  * - Extracts <title> (the display name) and <meta name="status"> (active|archived)
@@ -505,7 +505,7 @@ function renderHomepage(active, archived) {
 <body>
   <main class="wrap">
     <header>
-      <h1>Interview Visualizer</h1>
+      <h1>Itv Visualizer</h1>
       <span class="count" id="count"></span>
     </header>
 
@@ -622,7 +622,7 @@ function copyDir(src, dest) {
 }
 
 function build() {
-  console.log('Generating Interview Visualizer site...');
+  console.log('Generating Itv Visualizer site...');
 
   const entries = collectModules();
   const active = entries.filter((e) => e.status === 'active');
