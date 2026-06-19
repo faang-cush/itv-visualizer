@@ -500,11 +500,21 @@ function build() {
 
   fs.writeFileSync(path.join(SITE_DIR, 'index.html'), renderHomepage(active, archived), 'utf8');
 
+  // If a custom domain is configured (a CNAME file at the repo root), ship it
+  // inside the artifact so GitHub Pages keeps serving the domain on every deploy.
+  const cnamePath = path.join(ROOT, 'CNAME');
+  let customDomain = null;
+  if (fs.existsSync(cnamePath)) {
+    customDomain = fs.readFileSync(cnamePath, 'utf8').trim();
+    fs.writeFileSync(path.join(SITE_DIR, 'CNAME'), customDomain + '\n', 'utf8');
+  }
+
   console.log('');
   console.log(`  active:   ${active.length}`);
   console.log(`  archived: ${archived.length}`);
   console.log(`  total:    ${entries.length}`);
   console.log(`  warnings: ${warnings.length}`);
+  if (customDomain) console.log(`  domain:   ${customDomain} (CNAME shipped)`);
   console.log('');
   console.log('Done. Output written to _site/');
 }

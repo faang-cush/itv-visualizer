@@ -20,7 +20,9 @@ never hand-edit the homepage — `index.html` is generated on every push and is 
 ├── modules/                  # every visualization .html file lives here
 │   └── example-stepper.html  # a sample module demonstrating the conventions
 ├── scripts/
-│   └── generate.js           # the homepage generator (Node, no dependencies)
+│   ├── generate.js           # the homepage generator (Node, no dependencies)
+│   └── setup.sh              # one-shot GitHub provisioning via the gh CLI
+├── CNAME                     # custom domain (created by setup.sh; shipped on every deploy)
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml         # GitHub Action: build + deploy to Pages
@@ -78,16 +80,40 @@ any time — flip it back to `active`.
 
 ---
 
-## One-time setup
+## One-time setup (scripted)
 
-1. Create a **public** GitHub repository and push this project.
-2. In the repo: **Settings → Pages → Build and deployment → Source → "GitHub Actions."**
-   (This is required for the artifact-based deploy used here — *not* the legacy "deploy from a
-   branch" option.)
-3. After the first push, the Action runs and the site goes live at
-   `https://<username>.github.io/<repo>/`.
-4. **Embed in Notion:** type `/embed`, paste a page URL (the homepage, or any individual
-   module), and adjust the embed height.
+Everything on the GitHub side is automated by `scripts/setup.sh` via the GitHub CLI — no
+clicking through the UI.
+
+**Prereqs (once):** install the [GitHub CLI](https://cli.github.com), then `gh auth login`.
+
+**Run it:**
+```bash
+DOMAIN=www.yourname.tech ./scripts/setup.sh
+# or: DOMAIN=viz.yourname.tech REPO=interview-visualizer ./scripts/setup.sh
+```
+
+The script is idempotent (safe to re-run) and:
+- writes the root `CNAME` file (the generator ships it into every deploy),
+- creates the **public** repo if missing and pushes `main`,
+- sets Pages **Source = GitHub Actions**,
+- sets the **custom domain**, and
+- enables **Enforce HTTPS** (best-effort — the TLS cert can take up to ~24h the first time; if
+  it isn't ready, the script prints the one-liner to enable it later).
+
+**DNS — the one manual step** (get.tech has no API): in the get.tech DNS panel add a single
+record:
+
+| Type | Host / Name | Value / Points to | TTL |
+|---|---|---|---|
+| `CNAME` | `www` *(or your chosen subdomain)* | `<your-username>.github.io` | default |
+
+After the Action runs (see the repo's **Actions** tab) and DNS propagates, the site is live at
+`https://www.yourname.tech`. Until DNS resolves it's reachable at the temporary
+`https://<username>.github.io/<repo>/`.
+
+**Embed in Notion:** type `/embed`, paste a page URL (the homepage, or any individual module),
+and adjust the embed height.
 
 On a public repository, GitHub Actions and GitHub Pages are both free for this use, and the
 generator runs in seconds per push.
