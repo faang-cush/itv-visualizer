@@ -7,7 +7,9 @@ system-design and CS interview concepts. Each visualization is a **single self-c
 a static site hosted free on **GitHub Pages**, and individual pages embed into **Notion**
 via their URLs.
 
-**The workflow:** ask an AI to generate a visualization → drop the resulting `.html` file
+** Fast workflow:** open https://github.com/faang-cush/itv-visualizer/upload/main/modules and drag the resulting `.html` -> commit -> done
+
+** Normal workflow:** ask an AI to generate a visualization → open code drop the resulting `.html` file
 into `modules/` → `git push`. A GitHub Action regenerates the homepage and redeploys. You
 never hand-edit the homepage — `index.html` is generated on every push and is not committed.
 
