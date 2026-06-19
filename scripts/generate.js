@@ -242,7 +242,7 @@ function renderHomepage(active, archived) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Interview Visualizer</title>
+  <title>Itv Visualizer</title>
   <meta name="description" content="A collection of interactive visualizations for system-design and CS interview concepts." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
